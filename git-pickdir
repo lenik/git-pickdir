@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# git-pickdir - Extract subdirectories to a new repo, flattened to root.
+# Usage: git-pickdir [OPTIONS] REPODIR SUBDIRS...
+
+set -euo pipefail
+
+readonly PROGNAME="${0##*/}"
+
+usage() {
+  echo "Usage: $PROGNAME [OPTIONS] REPODIR SUBDIRS..." >&2
+  echo "Extract one or more subdirectories into REPODIR, flattened to repository root." >&2
+  exit 1
+}
+
+err() {
+  echo "$PROGNAME: $*" >&2
+  exit 1
+}
+
+# --- Parse arguments ---------------------------------------------------------
+parse_args() {
+  if [[ $# -lt 2 ]]; then
+    usage
+  fi
+  REPODIR="$1"
+  shift
+  SUBDIRS=("$@")
+  if [[ ${#SUBDIRS[@]} -eq 0 ]]; then
+    err "No SUBDIR provided."
+  fi
+}
+
+# --- Repository root ---------------------------------------------------------
+detect_repo_root() {
+  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || err "Not inside a Git repository."
+  REPO_ROOT="$(cd "$REPO_ROOT" && pwd)"
+  git rev-parse -q HEAD &>/dev/null || err "Repository has no commits."
+}
+
+# --- Normalize subdirs: strip trailing slashes, reject absolute and .. --------
+normalize_subdirs() {
+  local i
+  for i in "${!SUBDIRS[@]}"; do
+    local s="${SUBDIRS[$i]}"
+    # Reject absolute paths
+    [[ "$s" == /* ]] && err "Absolute path not allowed: $s"
+    # Reject paths containing ..
+    [[ "$s" == *".."* ]] && err "Path containing '..' not allowed: $s"
+    # Normalize trailing slash
+    while [[ "$s" == */ ]]; do
+      s="${s%/}"
+    done
+    [[ -z "$s" ]] && err "Invalid empty subdir."
+    SUBDIRS[$i]="$s"
+  done
+}
+
+# --- Validate: exist at HEAD, no subdir is prefix of another ------------------
+validate_subdirs() {
+  local i j
+  for i in "${!SUBDIRS[@]}"; do
+    local sub="${SUBDIRS[$i]}"
+    if ! git ls-tree HEAD -- "$sub" &>/dev/null; then
+      err "SUBDIR does not exist at HEAD: $sub"
+    fi
+  done
+  for i in "${!SUBDIRS[@]}"; do
+    for j in "${!SUBDIRS[@]}"; do
+      [[ $i -eq $j ]] && continue
+      local a="${SUBDIRS[$i]}"
+      local b="${SUBDIRS[$j]}"
+      if [[ "$a" == "$b"/* ]] || [[ "$b" == "$a"/* ]]; then
+        err "Ambiguous path inclusion: one SUBDIR is prefix of another ($a vs $b)."
+      fi
+    done
+  done
+}
+
+# --- Conflict detection at HEAD: flatten names and check for duplicates -------
+detect_conflicts() {
+  local -a all_files=()
+  local sub f rel
+  for sub in "${SUBDIRS[@]}"; do
+    while IFS= read -r -d '' f; do
+      rel="${f#$sub/}"
+      [[ "$rel" == "$f" ]] && continue
+      all_files+=("$rel")
+    done < <(git ls-tree -r --name-only -z HEAD -- "$sub" 2>/dev/null || true)
+  done
+  local -A seen=()
+  for rel in "${all_files[@]}"; do
+    if [[ -n "${seen[$rel]:-}" ]]; then
+      err "Filename collision when flattening: '$rel' would appear from more than one SUBDIR."
+    fi
+    seen[$rel]=1
+  done
+}
+
+# --- Fresh = only packed objects, no remotes ----------------------------------
+detect_fresh() {
+  local loose
+  loose="$(find "$REPO_ROOT/.git/objects" -type f 2>/dev/null | grep -v "pack" || true)"
+  if [[ -n "$loose" ]]; then
+    FRESH=0
+    return
+  fi
+  if [[ -n "$(git -C "$REPO_ROOT" remote -v 2>/dev/null)" ]]; then
+    FRESH=0
+    return
+  fi
+  FRESH=1
+}
+
+# --- Copy or clone into REPODIR -----------------------------------------------
+copy_or_clone() {
+  if [[ -e "$REPODIR" ]]; then
+    err "REPODIR already exists: $REPODIR"
+  fi
+  if [[ "$FRESH" -eq 1 ]]; then
+    cp -a "$REPO_ROOT" "$REPODIR"
+  else
+    git clone --no-local "$REPO_ROOT" "$REPODIR"
+  fi
+}
+
+# --- Rewrite history with git filter-repo -------------------------------------
+rewrite_history() {
+  if ! command -v git-filter-repo &>/dev/null; then
+    err "git filter-repo is not installed or not in PATH."
+  fi
+  local -a path_args=()
+  local -a rename_args=()
+  local sub
+  for sub in "${SUBDIRS[@]}"; do
+    path_args+=(--path "$sub/")
+    rename_args+=(--path-rename "$sub/:")
+  done
+  (
+    cd "$REPODIR"
+    git filter-repo --force "${path_args[@]}" "${rename_args[@]}"
+  ) || err "git filter-repo failed."
+}
+
+# --- Ensure at least one file remains -----------------------------------------
+check_non_empty_result() {
+  (
+    cd "$REPODIR"
+    if ! git ls-tree -r HEAD 2>/dev/null | grep -q .; then
+      echo "$PROGNAME: no files remain after filtering." >&2
+      exit 1
+    fi
+  ) || err "No files remain after filtering."
+}
+
+# --- Main ---------------------------------------------------------------------
+main() {
+  local REPODIR REPO_ROOT SUBDIRS FRESH
+  parse_args "$@"
+  detect_repo_root
+  normalize_subdirs
+  validate_subdirs
+  detect_conflicts
+  detect_fresh
+  copy_or_clone
+  rewrite_history
+  check_non_empty_result
+  echo "Done. New repository at: $REPODIR"
+}
+
+main "$@"

@@ -1,0 +1,64 @@
+.\" Copyright 2025. License: GPL.
+.TH GIT\-PICKDIR 1 "" "git-pickdir 1.0.0" "User Commands"
+.SH NAME
+git-pickdir \- extract subdirectories into a new repo with history flattened to root
+.SH SYNOPSIS
+.B git-pickdir
+[\fIOPTIONS\fR]
+\fIREPODIR\fR
+\fISUBDIRS\fR...
+.SH DESCRIPTION
+\fBgit-pickdir\fR extracts one or more subdirectories from the current Git
+repository into a new repository. Selected paths are flattened to the
+repository root and history is rewritten (using \fBgit-filter-repo\fR(1)) so
+that only those paths remain.
+.PP
+Must be run inside a valid Git repository with at least one commit.
+Repository root is detected with \fBgit rev-parse \-\-show-toplevel\fR.
+.PP
+\fIREPODIR\fR is the target directory for the new repository; it must not
+already exist.
+.PP
+\fISUBDIRS\fR are repository-relative paths to directories to extract (e.g.
+\fIsrc/lib\fR, \fIinclude/common\fR). Trailing slashes are normalized. No
+subdirectory may be a prefix of another. If flattening would produce the same
+filename from different subdirs, the command fails.
+.SH COPY STRATEGY
+If the current repository is "fresh" (no loose objects under
+\fI.git/objects\fR and no remotes), \fBgit-pickdir\fR uses \fBcp \-a\fR for a
+fast copy. Otherwise it uses \fBgit clone \-\-no-local\fR to avoid hardlinks.
+.SH EXIT STATUS
+Exits non-zero and prints to stderr if:
+.IP \(bu 2
+Not run inside a Git repository
+.IP \(bu 2
+Repository has no commits
+.IP \(bu 2
+\fIREPODIR\fR already exists
+.IP \(bu 2
+No \fISUBDIRS\fR provided
+.IP \(bu 2
+Any \fISUBDIR\fR does not exist at HEAD
+.IP \(bu 2
+\fISUBDIR\fR is absolute or contains \fI..\fR
+.IP \(bu 2
+One subdir is a prefix of another
+.IP \(bu 2
+Filename collision when flattening
+.IP \(bu 2
+\fBgit-filter-repo\fR is not installed or not in PATH
+.IP \(bu 2
+A Git or filter-repo command fails
+.IP \(bu 2
+No files remain after filtering
+.SH EXAMPLE
+.EX
+git-pickdir ../newrepo src/lib include/common
+.EE
+Creates \fI../newrepo\fR with only the contents of \fIsrc/lib\fR and
+\fIinclude/common\fR at the repository root and history preserved for those
+paths.
+.SH REQUIREMENTS
+\fBgit\fR(1) \(>= 2.x and \fBgit-filter-repo\fR must be installed and on PATH.
+.SH SEE ALSO
+\fBgit\fR(1), \fBgit-filter-repo\fR(1), \fBgit-clone\fR(1)
