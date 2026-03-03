@@ -1,0 +1,3 @@
+git-pickdir usr/bin/
+git-pickdir.1 usr/share/man/man1/
+bash-completion/git-pickdir usr/share/bash-completion/completions/

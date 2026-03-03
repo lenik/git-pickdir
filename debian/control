@@ -1,0 +1,21 @@
+Source: git-pickdir
+Section: vcs
+Priority: optional
+Maintainer: Debian QA Group <packages@qa.debian.org>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: git-pickdir
+Architecture: all
+Depends: git (>= 2),
+         git-filter-repo,
+         ${misc:Depends}
+Description: extract subdirectories into a new repo with history flattened to root
+ git-pickdir extracts one or more subdirectories from the current Git
+ repository into a new repository. Selected paths are flattened to the
+ repository root and history is rewritten (using git-filter-repo) so that
+ only those paths remain.
+ .
+ Useful for splitting out parts of a monorepo or creating a new repo from
+ selected directories while preserving their history.

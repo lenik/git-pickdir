@@ -1,0 +1,26 @@
+# bash completion for git-pickdir
+# Usage: git-pickdir REPODIR SUBDIRS...
+# First word: directory (REPODIR). Remaining words: repo-relative subdirs.
+
+_git_pickdir() {
+  local cur prev words cword
+  _init_completion -s || return
+
+  case $cword in
+    1)
+      # REPODIR: complete directories
+      _filedir -d
+      ;;
+    *)
+      # SUBDIRS: complete repository-relative directories from HEAD
+      local root list
+      root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
+      git rev-parse -q HEAD &>/dev/null || return 0
+      # List all tree (directory) paths recursively
+      list="$(git -C "$root" ls-tree -r -d --name-only HEAD 2>/dev/null)"
+      COMPREPLY=($(compgen -W "$list" -- "$cur"))
+      ;;
+  esac
+}
+
+complete -o nospace -F _git_pickdir git-pickdir
